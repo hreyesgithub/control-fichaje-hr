@@ -148,6 +148,8 @@ def registrar_fichaje(
     data: dict = Body(...)
 ):
     print("LOG: La función registrar_fichaje ha sido invocada")
+    print(f"📦 Body recibido: {data}")  # Muestra todo el payload
+
     headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -201,28 +203,32 @@ def registrar_fichaje(
 
     empleado_doc_snapshot = query[0]
     employee_id_verificado = empleado_doc_snapshot.id
+    index_ref = db.collection("empleados_index").document(uid_usuario)
+    index_snap = index_ref.get()
+    if index_snap.exists: #type: ignore
+        can_telework = index_snap.get("can_telework", False) #type: ignore
+        is_telework = is_telework or can_telework  # #type: ignore prioriza el dato de BD
 
     # 5. Validar geolocalización
     client_geo = data.get("geo_data")
     if not client_geo or "lat" not in client_geo or "lon" not in client_geo:
         raise HTTPException(status_code=400, detail="Se requiere ubicación GPS (lat/lon)")
 
-    # 6. Obtener configuración de la empresa (ubicación de oficina)
-    company_doc = db.collection("companies").document(company_id).get()
-    if not company_doc.exists: # type: ignore
-        raise HTTPException(status_code=404, detail="Configuración de empresa no encontrada")
-
-    company_data = company_doc.to_dict() # type: ignore
-    if not company_data:
-        raise HTTPException(status_code=404, detail="Datos de la empresa vacíos")
-
-    office_geo = company_data.get("office_location")
-    if not office_geo or "lat" not in office_geo or "lon" not in office_geo:
-        raise HTTPException(status_code=400, detail="Ubicación de oficina inválida")
-
-    # 7. Calcular distancia y validar rango (si no es teletrabajo)
+    # 6. Calcular distancia y validar rango (si no es teletrabajo)
     is_telework = data.get("is_telework", False)
     if not is_telework:
+       # Solo validamos oficina si NO es teletrabajo
+        company_doc: Any = db.collection("companies").document(company_id).get()
+        if not company_doc.exists:
+            raise HTTPException(404, "Configuración de empresa no encontrada")
+        company_data = company_doc.to_dict()
+        if not company_data:
+            raise HTTPException(404, "Datos de la empresa vacíos")
+        
+        office_geo = company_data.get("office_location")
+        if not office_geo or "lat" not in office_geo or "lon" not in office_geo:
+            raise HTTPException(400, "Ubicación de oficina inválida o no configurada")
+
         distancia = calcular_distancia(
             client_geo["lat"],
             client_geo["lon"],
@@ -242,6 +248,19 @@ def registrar_fichaje(
                 media_type="application/json",
                 headers=headers
             )
+
+    # 7. Obtener configuración de la empresa (ubicación de oficina)
+    company_doc = db.collection("companies").document(company_id).get()
+    if not company_doc.exists: # type: ignore
+        raise HTTPException(status_code=404, detail="Configuración de empresa no encontrada")
+
+    company_data = company_doc.to_dict() # type: ignore
+    if not company_data:
+        raise HTTPException(status_code=404, detail="Datos de la empresa vacíos")
+
+    office_geo = company_data.get("office_location")
+    if not office_geo or "lat" not in office_geo or "lon" not in office_geo:
+        raise HTTPException(status_code=400, detail="Ubicación de oficina inválida")
 
     # 8. Validar tipo de evento
     event_type = data.get("event_type")
