@@ -350,6 +350,18 @@ def registrar_fichaje(
         print(f"🔥 Error al guardar en Firestore: {e}")
         raise HTTPException(status_code=500, detail=f"Error al guardar fichaje: {str(e)}")
 
+    # Actualizar estadísticas de la empresa
+    try:
+        company_ref = db.collection("companies").document(company_id)
+        company_ref.update({
+            "stats_mes.total_eventos": gcloud_firestore.Increment(1),
+            "stats_mes.total_pagar": gcloud_firestore.Increment(0.066666667)
+        })
+        print("📊 Estadísticas actualizadas para", company_id)
+    except Exception as e:
+        print(f"⚠️ Error al actualizar estadísticas: {e}")
+        # No lanzamos excepción para no interrumpir el fichaje
+
     # 12. Tarea en segundo plano (Sheets + Email)
     print("⏳ Encolando tarea en segundo plano...")
     background_tasks.add_task(emular_trigger_fichaje, company_id, employee_id_verificado, nuevo_fichaje)

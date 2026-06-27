@@ -5,7 +5,6 @@ from services.secrets import obtener_secreto
 
 logger = logging.getLogger(__name__)
 
-
 def enviar_email_confirmacion(datos: dict) -> str:
     """Envía un correo de confirmación usando EmailJS."""
     if not datos.get("employee_email"):
@@ -14,6 +13,7 @@ def enviar_email_confirmacion(datos: dict) -> str:
         service_id = obtener_secreto("emailjs-service-id")
         template_id = obtener_secreto("emailjs-template-id")
         user_id = obtener_secreto("emailjs-user-id")
+        private_key = obtener_secreto("emailjs-private-key") 
         template_params = {
             "employee_name": datos["employee_name"],
             "event_type": datos["event_type"],
@@ -29,6 +29,7 @@ def enviar_email_confirmacion(datos: dict) -> str:
                 "service_id": service_id,
                 "template_id": template_id,
                 "user_id": user_id,
+                "accessToken": private_key,
                 "template_params": template_params 
             },
             headers={"Content-Type": "application/json"},
