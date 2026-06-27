@@ -1,0 +1,15 @@
+# Ignorar archivo de configuración con la Key de API e individuales
+js/config.json
+readme-guia.md
+public/js/config.json
+config.json
+
+# Ignorar carpetas de dependencias
+.firebase/
+param/
+
+# Ignorar archivos especificos de firebase
+.firebaserc
+firebase.json
+firestore.indexes.json
+firestore.rules
