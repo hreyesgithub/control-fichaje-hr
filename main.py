@@ -142,11 +142,11 @@ def hello_pyme():
     return {"status": "success", "message": "Backend PYMEasyHR operativo en Render"}
 
 @app.post("/registrar_fichaje")
-def registrar_fichaje(
+def registrar_fichaje_v0(
     request: Request,
     background_tasks: BackgroundTasks,
     data: dict = Body(...)
-):
+    ):
     print("LOG: La función registrar_fichaje ha sido invocada")
     print(f"📦 Body recibido: {data}")  # Muestra todo el payload
 
@@ -326,6 +326,225 @@ def registrar_fichaje(
     background_tasks.add_task(emular_trigger_fichaje, company_id, employee_id_verificado, nuevo_fichaje)
 
     # 12. Respuesta JSON
+    return {
+        "status": "success",
+        "message": f"Fichaje {event_type} registrado correctamente.",
+        "event_id": event_id
+    }
+@app.post("/registrar_fichaje")
+def registrar_fichaje(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    data: dict = Body(...)
+):
+    print("🔵 LOG: La función registrar_fichaje ha sido invocada")
+    print(f"📦 Body recibido: {data}")
+
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "Access-Control-Max-Age": "3600",
+    }
+
+    # 1. Validar token
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        print("❌ Error: Falta token")
+        raise HTTPException(status_code=401, detail="Falta Token")
+
+    id_token = auth_header.split("Bearer ")[1]
+    try:
+        decoded_token = auth.verify_id_token(id_token)
+        email_autenticado = decoded_token.get("email")
+        uid_usuario = decoded_token.get("uid")
+        print(f"✅ Token válido: email={email_autenticado}, uid={uid_usuario}")
+    except Exception as e:
+        print(f"❌ Error al verificar token: {e}")
+        raise HTTPException(status_code=401, detail="Token inválido o expirado")
+
+    if not uid_usuario or not email_autenticado:
+        print("❌ Token incompleto: falta email o uid")
+        raise HTTPException(status_code=401, detail="Token incompleto")
+
+    # 2. Obtener company_id
+    company_id = data.get("company_id")
+    if not company_id:
+        print("❌ Falta company_id en el body")
+        raise HTTPException(status_code=400, detail="Falta company_id en la solicitud")
+    print(f"🏢 company_id: {company_id}")
+
+    db = admin_firestore.client()
+
+    # 3. Verificar documento de la empresa en Firestore
+    try:
+        print(f"🔍 Buscando empresa {company_id} en Firestore...")
+        company_doc = db.collection("companies").document(company_id).get()
+        if not company_doc.exists: #type:ignore
+            print(f"❌ Empresa {company_id} NO existe en Firestore")
+            raise HTTPException(status_code=404, detail=f"Empresa {company_id} no encontrada")
+        company_data = company_doc.to_dict() #type:ignore
+        print(f"✅ Empresa encontrada. Datos: {company_data}")
+    except Exception as e:
+        print(f"🔥 Error al leer empresa: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al leer datos de empresa: {str(e)}")
+
+    # 4. Verificar empleado en la empresa
+    try:
+        print(f"🔍 Buscando empleado con email {email_autenticado} en {company_id}...")
+        empleados_ref = db.collection("companies").document(company_id).collection("employees")
+        query = empleados_ref.where("email", "==", email_autenticado).limit(1).get()
+        if len(query) == 0:
+            print(f"❌ Empleado {email_autenticado} NO encontrado en {company_id}")
+            raise HTTPException(status_code=404, detail="Empleado no encontrado en BD")
+        empleado_doc = query[0]
+        employee_id_verificado = empleado_doc.id
+        empleado_data = empleado_doc.to_dict()
+        print(f"✅ Empleado encontrado: ID={employee_id_verificado}, datos={empleado_data}")
+    except Exception as e:
+        print(f"🔥 Error al buscar empleado: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al buscar empleado: {str(e)}")
+
+    # 5. Verificar documento en empleados_index (para can_telework y permisos)
+    try:
+        print(f"🔍 Buscando índice del usuario {uid_usuario} en empleados_index...")
+        index_ref = db.collection("empleados_index").document(uid_usuario)
+        index_snap = index_ref.get()
+        if not index_snap.exists: #type:ignore
+            print(f"⚠️ No existe documento en empleados_index para {uid_usuario}")
+            # No lanzamos error, pero registramos
+        else:
+            index_data = index_snap.to_dict() #type:ignore
+            print(f"✅ empleados_index encontrado: {index_data}")
+            can_telework = index_snap.get("can_telework") #type:ignore
+            print(f"   can_telework = {can_telework}")
+
+            # Validar que company_id coincida
+            if index_snap.get("company_id") != company_id: #type:ignore
+                print(f"❌ company_id en índice ({index_snap.get('company_id')}) no coincide con {company_id}") #type:ignore
+                raise HTTPException(status_code=403, detail="El usuario no pertenece a esta empresa")
+    except Exception as e:
+        print(f"🔥 Error al leer empleados_index: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al verificar permisos: {str(e)}")
+
+    # 6. Validar geo_data
+    client_geo = data.get("geo_data")
+    if not client_geo:
+        print("❌ Falta geo_data en el body")
+        raise HTTPException(status_code=400, detail="Falta ubicación GPS")
+    if "lat" not in client_geo or "lon" not in client_geo:
+        print(f"❌ geo_data incompleto: {client_geo}")
+        raise HTTPException(status_code=400, detail="Ubicación GPS incompleta (falta lat o lon)")
+    print(f"📍 Ubicación del cliente: lat={client_geo['lat']}, lon={client_geo['lon']}")
+
+    # 7. Determinar si es teletrabajo
+    is_telework = data.get("is_telework", False)
+    print(f"🏠 is_telework enviado: {is_telework}")
+
+    # 8. Validar oficina solo si NO es teletrabajo
+    if not is_telework:
+        print("📍 Validando oficina para fichaje presencial...")
+        office_geo = company_data.get("office_location") #type:ignore
+        if not office_geo:
+            print("❌ La empresa no tiene office_location configurado")
+            raise HTTPException(status_code=400, detail="Ubicación de oficina no configurada para esta empresa")
+        if "lat" not in office_geo or "lon" not in office_geo:
+            print(f"❌ office_location incompleto: {office_geo}")
+            raise HTTPException(status_code=400, detail="Ubicación de oficina incompleta (falta lat o lon)")
+        print(f"📍 Oficina: lat={office_geo['lat']}, lon={office_geo['lon']}")
+
+        try:
+            distancia = calcular_distancia(
+                client_geo["lat"],
+                client_geo["lon"],
+                office_geo["lat"],
+                office_geo["lon"]
+            )
+            print(f"📏 Distancia calculada: {distancia:.2f} metros")
+        except Exception as e:
+            print(f"🔥 Error al calcular distancia: {e}")
+            raise HTTPException(status_code=500, detail=f"Error al calcular distancia: {str(e)}")
+
+        RADIO_MAXIMO = 200
+        if distancia > RADIO_MAXIMO:
+            print(f"⛔ Distancia excede {RADIO_MAXIMO}m: {distancia}")
+            return Response(
+                content=json.dumps({
+                    "status": "denied",
+                    "message": f"Fuera de rango. Estás a {int(distancia)}m de la oficina.",
+                    "distancia": int(distancia),
+                }),
+                status_code=403,
+                media_type="application/json",
+                headers=headers
+            )
+        print("✅ Distancia dentro del rango permitido")
+    else:
+        print("🏠 Teletrabajo activo, omitiendo validación de oficina")
+
+    # 9. Validar tipo de evento
+    event_type = data.get("event_type")
+    source = data.get("source", "web_secure")
+    if event_type not in ["IN", "OUT", "BREAK_START", "BREAK_END"]:
+        print(f"❌ Tipo de evento no válido: {event_type}")
+        raise HTTPException(status_code=400, detail=f"Tipo de evento no válido: {event_type}")
+    print(f"📝 Evento: {event_type}, fuente: {source}")
+
+    # 10. Construir documento del fichaje
+    timestamp_ahora = datetime.now(timezone.utc)
+    nuevo_fichaje = {
+        "employee_id": employee_id_verificado,
+        "company_id": company_id,
+        "event_type": event_type,
+        "source": source,
+        "work_date": timestamp_ahora.strftime("%Y-%m-%d"),
+        "timestamp": gcloud_firestore.SERVER_TIMESTAMP,
+        "timezone": "Europe/Madrid",
+        "ip_address": request.headers.get("X-Forwarded-For", "Desconocida"),
+        "user_agent": request.headers.get("User-Agent", "Desconocido"),
+        "geo_data": data.get("geo_data"),
+    }
+
+    # Hash opcional
+    try:
+        string_para_hash = f"{employee_id_verificado}{timestamp_ahora.isoformat()}{event_type}{company_id}"
+        nuevo_fichaje["data_hash"] = hashlib.sha256(string_para_hash.encode()).hexdigest()
+        print(f"🔐 Hash generado: {nuevo_fichaje['data_hash']}")
+    except Exception as e:
+        print(f"⚠️ No se pudo calcular el hash: {e}")
+
+    # 11. Guardar en Firestore
+    try:
+        print("💾 Guardando en Firestore...")
+        user_doc_ref = (
+            db.collection("companies")
+            .document(company_id)
+            .collection("clock_events")
+            .document(uid_usuario)
+        )
+        user_doc_ref.set(
+            {
+                "employee_id": employee_id_verificado,
+                "email": email_autenticado,
+                "company_id": company_id,
+                "auth_uid": uid_usuario,
+                "updated_at": gcloud_firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+        events_ref = user_doc_ref.collection("events")
+        _, event_ref = events_ref.add(nuevo_fichaje)
+        event_id = event_ref.id
+        print(f"✅ Fichaje guardado con ID: {event_id}")
+    except Exception as e:
+        print(f"🔥 Error al guardar en Firestore: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al guardar fichaje: {str(e)}")
+
+    # 12. Tarea en segundo plano (Sheets + Email)
+    print("⏳ Encolando tarea en segundo plano...")
+    background_tasks.add_task(emular_trigger_fichaje, company_id, employee_id_verificado, nuevo_fichaje)
+
+    # 13. Respuesta exitosa
     return {
         "status": "success",
         "message": f"Fichaje {event_type} registrado correctamente.",
