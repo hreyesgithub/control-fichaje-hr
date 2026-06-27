@@ -205,9 +205,17 @@ def registrar_fichaje(
     employee_id_verificado = empleado_doc_snapshot.id
     index_ref = db.collection("empleados_index").document(uid_usuario)
     index_snap = index_ref.get()
-    if index_snap.exists: #type: ignore
-        can_telework = index_snap.get("can_telework", False) #type: ignore
-        is_telework = is_telework or can_telework  # #type: ignore prioriza el dato de BD
+    if not index_snap.exists: # type: ignore
+        raise HTTPException(403, "Usuario no registrado en empresa")
+    if index_snap.get("company_id") != company_id: # type: ignore
+        raise HTTPException(403, "Empresa no coincide")
+    
+    # Leer can_telework (sin valor por defecto)
+    can_telework = index_snap.get("can_telework") # type: ignore
+    is_telework = data.get("is_telework", False)
+    # Priorizar el valor de la BD si está presente
+    if can_telework is not None:
+        is_telework = can_telework or is_telework
 
     # 5. Validar geolocalización
     client_geo = data.get("geo_data")
