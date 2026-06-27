@@ -29,10 +29,7 @@ def enviar_email_confirmacion(datos: dict) -> str:
                 "service_id": service_id,
                 "template_id": template_id,
                 "user_id": user_id,
-                "template_params": template_params,
-                "accessToken": obtener_secreto(
-                    "emailjs-access-token"
-                ), 
+                "template_params": template_params 
             },
             headers={"Content-Type": "application/json"},
             timeout=10,  
