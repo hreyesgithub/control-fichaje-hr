@@ -26,6 +26,22 @@ El sistema está desarrollado sobre **Firebase Functions (v2)** utilizando Pytho
     └── sheets.py    # Conector y escritor para la API de Google Sheets mediante gspread.
 ```
 
+### 🔐 Variables de Entorno a configurar en Render (Environment Variables)
+
+Añade las siguientes claves directamente en la sección Environment de tu servicio en Render:
+
+| Key | Value|
+|-------|-------|
+|FIREBASE_SERVICE_ACCOUNT_JSON|El contenido completo (en una sola línea) de tu archivo .json de la cuenta de servicio de Firebase para que el Admin SDK se autentique fuera de GCP.|
+|PYMEASYHR_SHEET_ID|Tu ID de la hoja de cálculo de Google Sheets.|
+|PYMEASYHR_SHEETS_KEY|El JSON de la cuenta de servicio autorizada en la hoja de cálculo.|
+|EMAILJS_SERVICE_ID|Tu Service ID de EmailJS.|
+|EMAILJS_TEMPLATE_ID|Tu Template ID de EmailJS.|
+|EMAILJS_USER_ID|Tu Public Key de EmailJS.|
+|EMAILJS_ACCESS_TOKEN|Tu Private Key / Access Token de EmailJS.|
+
+
+
 ## Configuración con `Render`
 
 ### 🚀 Paso 1

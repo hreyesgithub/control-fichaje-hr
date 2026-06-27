@@ -13,3 +13,5 @@ param/
 firebase.json
 firestore.indexes.json
 firestore.rules
+pymeasy-hr-firebase-adminsdk-fbsvc-b941b6f2b5.json
+pymeasy-hr-spreadsheet.json
